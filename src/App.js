@@ -1,29 +1,42 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
-import AWS from 'aws-sdk';
+// import { athenaService } from './athenaService'; // ✅ updated v3 Athena service
 import filtersConfig from './filtersConfig';
 
-// ---------- AWS Athena (dev only: do not hardcode in production) ----------
-AWS.config.update({
+import {
+  AthenaClient,
+  StartQueryExecutionCommand,
+  GetQueryExecutionCommand,
+  GetQueryResultsCommand,
+} from '@aws-sdk/client-athena';
+
+
+const athena = new AthenaClient({
   region: 'us-east-1',
-  accessKeyId: 'YOUR_ACCESS_KEY_ID',
-  secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',
+  credentials: {
+    accessKeyId: 'YOUR_ACCESS_KEY_ID',
+    secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',
+  },
 });
 
-const athena = new AWS.Athena();
-
-const waitForQuery = async (QueryExecutionId) => {
+const waitForQuery = async (executionId) => {
   while (true) {
-    const res = await athena.getQueryExecution({ QueryExecutionId }).promise();
-    const state = res.QueryExecution.Status.State;
+    const { QueryExecution } = await athena.send(
+      new GetQueryExecutionCommand({ QueryExecutionId: executionId })
+    );
+
+    const state = QueryExecution.Status.State;
     if (state === 'SUCCEEDED') return;
-    if (['FAILED', 'CANCELLED'].includes(state)) throw new Error(`Athena query failed: ${state}`);
-    await new Promise((r) => setTimeout(r, 1000));
+    if (state === 'FAILED' || state === 'CANCELLED') throw new Error(`Query ${state}`);
+    await new Promise((res) => setTimeout(res, 1000));
   }
 };
 
-const getQueryResults = async (QueryExecutionId) => {
-  const res = await athena.getQueryResults({ QueryExecutionId }).promise();
-  const [header, ...rows] = res.ResultSet.Rows;
+const getQueryResults = async (executionId) => {
+  const { ResultSet } = await athena.send(
+    new GetQueryResultsCommand({ QueryExecutionId: executionId })
+  );
+
+  const [header, ...rows] = ResultSet.Rows;
   const headers = header.Data.map((d) => d.VarCharValue);
   return rows.map((row) => {
     const values = row.Data.map((d) => d.VarCharValue || '');
@@ -31,19 +44,26 @@ const getQueryResults = async (QueryExecutionId) => {
   });
 };
 
-const athenaService = async (query, boxId) => {
-  console.log(`[SQL for ${boxId}]: ${query}`);
-  const start = await athena.startQueryExecution({
-    QueryString: query,
-    QueryExecutionContext: { Database: 'your_athena_db' },
-    ResultConfiguration: {
-      OutputLocation: 's3://your-athena-results-bucket/',
-    },
-  }).promise();
+export const athenaService = async (query, boxId) => {
+  console.log(`[SQL for ${boxId}] → ${query}`);
 
-  await waitForQuery(start.QueryExecutionId);
-  return await getQueryResults(start.QueryExecutionId);
+  const start = await athena.send(
+    new StartQueryExecutionCommand({
+      QueryString: query,
+      QueryExecutionContext: {
+        Database: 'your_athena_db',
+      },
+      ResultConfiguration: {
+        OutputLocation: 's3://your-athena-results-bucket/',
+      },
+    })
+  );
+
+  const executionId = start.QueryExecutionId;
+  await waitForQuery(executionId);
+  return await getQueryResults(executionId);
 };
+
 
 // ---------- Context ----------
 const FilterContext = createContext();

@@ -10,7 +10,7 @@ const filtersConfig = [
     key: 'team',
     label: 'Team',
     type: 'multi-select',
-    options: ['T1', 'T2', 'All'],
+    options: ['T1', 'T2', 'All', 'T6'],
   },
   {
     key: 'subTeam',
