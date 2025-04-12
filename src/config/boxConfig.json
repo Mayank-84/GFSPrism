@@ -1,0 +1,15 @@
+[
+    {
+      "id": "box1",
+      "title": "User Stats",
+      "queryBuilder": "Box1/queryBuilder.js",
+      "parser": "Box1/parser.js"
+    },
+    {
+      "id": "box2",
+      "title": "Total Revenue",
+      "queryBuilder": "Box2/queryBuilder.js",
+      "parser": "Box2/parser.js"
+    }
+  ]
+  
