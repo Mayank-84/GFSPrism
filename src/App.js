@@ -8,13 +8,13 @@ import {
 
 import filtersConfig from './filtersConfig';
 
-// ---------- AWS Athena Client ----------
+// ------------------- AWS Athena Setup -------------------
 const athena = new AthenaClient({
   region: 'us-east-1',
-  credentials: {
-    accessKeyId: 'YOUR_AWS_ACCESS_KEY_ID',
-    secretAccessKey: 'YOUR_AWS_SECRET_ACCESS_KEY',
-  },
+  credentials: ({
+    accessKeyId: 'YOUR_ACCESS_KEY_ID',
+    secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',
+  }),
 });
 
 const waitForQuery = async (executionId) => {
@@ -56,11 +56,11 @@ const athenaService = async (query, boxId) => {
   return await getQueryResults(start.QueryExecutionId);
 };
 
-// ---------- Context ----------
+// ------------------- Context -------------------
 const FilterContext = createContext();
 const useFilters = () => useContext(FilterContext);
 
-// ---------- Query Builder ----------
+// ------------------- Query Builder -------------------
 const queryBuilder = (baseSQL, filters) => {
   let query = baseSQL;
   const clauses = [];
@@ -85,7 +85,7 @@ const queryBuilder = (baseSQL, filters) => {
   return query;
 };
 
-// ---------- Dashboard Config ----------
+// ------------------- Dashboard Config -------------------
 const dashboardConfig = [
   {
     id: 'revenue_kpi',
@@ -96,7 +96,7 @@ const dashboardConfig = [
       return { title: 'Revenue', value: item.value, label: item.label };
     },
     Renderer: ({ parsed }) => (
-      <div style={{ padding: 16, border: '1px solid #ddd' }}>
+      <div style={{ padding: 16, border: '1px solid #ddd', marginBottom: 16 }}>
         <h3>{parsed?.title || 'N/A'}</h3>
         <p style={{ fontSize: 22 }}>{parsed?.value || '--'}</p>
         <small>{parsed?.label}</small>
@@ -123,18 +123,26 @@ const dashboardConfig = [
 
       return (
         <div>
-          <table border="1" cellPadding={4}>
-            <thead>
-              <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {paginatedRows.map((row, i) => (
-                <tr key={i}>
-                  {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div
+            style={{
+              overflowY: 'auto',
+              maxHeight: '400px',
+              border: '1px solid #ddd',
+            }}
+          >
+            <table style={{ width: '100%', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
+              <thead>
+                <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {paginatedRows.map((row, i) => (
+                  <tr key={i}>
+                    {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <div style={{ marginTop: 8 }}>
             <button onClick={() => onPageChange(currentPage - 1)} disabled={currentPage <= 0}>
               Prev
@@ -150,7 +158,7 @@ const dashboardConfig = [
   },
 ];
 
-// ---------- Sidebar ----------
+// ------------------- Sidebar -------------------
 const Sidebar = ({ onApply }) => {
   const { tempFilters, setTempFilters } = useFilters();
 
@@ -198,13 +206,13 @@ const Sidebar = ({ onApply }) => {
   );
 };
 
-// ---------- Dashboard ----------
+// ------------------- Dashboard -------------------
 const Dashboard = () => {
   const { filters, tempFilters, setFilters } = useFilters();
   const [dataMap, setDataMap] = useState({});
   const [loadingMap, setLoadingMap] = useState({});
   const [trigger, setTrigger] = useState(0);
-  const [paginationMap, setPaginationMap] = useState({}); // boxId → page number
+  const [paginationMap, setPaginationMap] = useState({});
 
   const applyFilters = () => {
     setFilters(tempFilters);
@@ -223,7 +231,7 @@ const Dashboard = () => {
         const parsed = cfg.parseResponse(raw);
 
         setDataMap((prev) => ({ ...prev, [cfg.id]: parsed }));
-        setPaginationMap((prev) => ({ ...prev, [cfg.id]: 0 })); // reset page
+        setPaginationMap((prev) => ({ ...prev, [cfg.id]: 0 }));
       } catch (err) {
         console.error(err);
         setDataMap((prev) => ({ ...prev, [cfg.id]: null }));
@@ -236,7 +244,7 @@ const Dashboard = () => {
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
       <Sidebar onApply={applyFilters} />
-      <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: 16, padding: 16 }}>
+      <div style={{ flex: 1, padding: 16 }}>
         {dashboardConfig.map((cfg) => {
           const Renderer = cfg.Renderer;
           const data = dataMap[cfg.id];
@@ -249,16 +257,18 @@ const Dashboard = () => {
           };
 
           return (
-            <div key={cfg.id} style={{ flex: 1, minWidth: 300 }}>
+            <div key={cfg.id} style={{ width: '100%', marginBottom: 32 }}>
               <h3>{cfg.title}</h3>
               {loading ? (
                 <div>Loading...</div>
               ) : (
                 <Renderer
                   parsed={data}
-                  currentPage={currentPage}
-                  onPageChange={handlePageChange}
-                  pageSize={cfg.pageSize}
+                  {...(cfg.frontendPagination && {
+                    currentPage,
+                    onPageChange: handlePageChange,
+                    pageSize: cfg.pageSize,
+                  })}
                 />
               )}
             </div>
@@ -269,7 +279,7 @@ const Dashboard = () => {
   );
 };
 
-// ---------- App ----------
+// ------------------- App -------------------
 const App = () => {
   const [filters, setFilters] = useState({});
   const [tempFilters, setTempFilters] = useState({});
