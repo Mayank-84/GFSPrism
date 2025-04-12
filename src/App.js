@@ -1,7 +1,4 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
-// import { athenaService } from './athenaService'; // ✅ updated v3 Athena service
-import filtersConfig from './filtersConfig';
-
 import {
   AthenaClient,
   StartQueryExecutionCommand,
@@ -9,12 +6,14 @@ import {
   GetQueryResultsCommand,
 } from '@aws-sdk/client-athena';
 
+import filtersConfig from './filtersConfig';
 
+// ---------- AWS Athena Client ----------
 const athena = new AthenaClient({
   region: 'us-east-1',
   credentials: {
-    accessKeyId: 'YOUR_ACCESS_KEY_ID',
-    secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',
+    accessKeyId: 'YOUR_AWS_ACCESS_KEY_ID',
+    secretAccessKey: 'YOUR_AWS_SECRET_ACCESS_KEY',
   },
 });
 
@@ -23,11 +22,10 @@ const waitForQuery = async (executionId) => {
     const { QueryExecution } = await athena.send(
       new GetQueryExecutionCommand({ QueryExecutionId: executionId })
     );
-
     const state = QueryExecution.Status.State;
     if (state === 'SUCCEEDED') return;
     if (state === 'FAILED' || state === 'CANCELLED') throw new Error(`Query ${state}`);
-    await new Promise((res) => setTimeout(res, 1000));
+    await new Promise((r) => setTimeout(r, 1000));
   }
 };
 
@@ -35,7 +33,6 @@ const getQueryResults = async (executionId) => {
   const { ResultSet } = await athena.send(
     new GetQueryResultsCommand({ QueryExecutionId: executionId })
   );
-
   const [header, ...rows] = ResultSet.Rows;
   const headers = header.Data.map((d) => d.VarCharValue);
   return rows.map((row) => {
@@ -44,26 +41,20 @@ const getQueryResults = async (executionId) => {
   });
 };
 
-export const athenaService = async (query, boxId) => {
+const athenaService = async (query, boxId) => {
   console.log(`[SQL for ${boxId}] → ${query}`);
-
   const start = await athena.send(
     new StartQueryExecutionCommand({
       QueryString: query,
-      QueryExecutionContext: {
-        Database: 'your_athena_db',
-      },
+      QueryExecutionContext: { Database: 'your_athena_db' },
       ResultConfiguration: {
         OutputLocation: 's3://your-athena-results-bucket/',
       },
     })
   );
-
-  const executionId = start.QueryExecutionId;
-  await waitForQuery(executionId);
-  return await getQueryResults(executionId);
+  await waitForQuery(start.QueryExecutionId);
+  return await getQueryResults(start.QueryExecutionId);
 };
-
 
 // ---------- Context ----------
 const FilterContext = createContext();
@@ -113,42 +104,49 @@ const dashboardConfig = [
     ),
   },
   {
-    id: 'employee_table',
-    title: 'Employee Table',
-    baseSQL: 'SELECT name, department FROM employee_data LIMIT 10',
+    id: 'headcount_table',
+    title: 'Headcount Table',
+    baseSQL: 'SELECT * FROM headcount',
+    frontendPagination: true,
+    pageSize: 10,
     parseResponse: (raw) => {
       const headers = Object.keys(raw[0] || {});
       return { headers, rows: raw };
     },
-    Renderer: ({ parsed }) =>
-      !parsed?.headers?.length ? (
-        <div>No data</div>
-      ) : (
-        <table border="1" cellPadding={4}>
-          <thead>
-            <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
-          </thead>
-          <tbody>
-            {parsed.rows.map((row, i) => (
-              <tr key={i}>
-                {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ),
-  },
-  {
-    id: 'headcount_graph',
-    title: 'Headcount Trend',
-    baseSQL: 'SELECT date, count FROM headcount ORDER BY date ASC',
-    parseResponse: (raw) => ({ points: raw }),
-    Renderer: ({ parsed }) =>
-      !parsed?.points?.length ? (
-        <div>No graph data</div>
-      ) : (
-        <pre>{JSON.stringify(parsed.points, null, 2)}</pre>
-      ),
+    Renderer: ({ parsed, currentPage, onPageChange, pageSize }) => {
+      if (!parsed?.headers?.length) return <div>No Data</div>;
+
+      const paginatedRows = parsed.rows.slice(
+        currentPage * pageSize,
+        (currentPage + 1) * pageSize
+      );
+
+      return (
+        <div>
+          <table border="1" cellPadding={4}>
+            <thead>
+              <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {paginatedRows.map((row, i) => (
+                <tr key={i}>
+                  {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => onPageChange(currentPage - 1)} disabled={currentPage <= 0}>
+              Prev
+            </button>
+            <span style={{ margin: '0 12px' }}>Page {currentPage + 1}</span>
+            <button onClick={() => onPageChange(currentPage + 1)}>
+              Next
+            </button>
+          </div>
+        </div>
+      );
+    },
   },
 ];
 
@@ -193,7 +191,9 @@ const Sidebar = ({ onApply }) => {
           ) : null}
         </div>
       ))}
-      <button onClick={onApply} style={{ marginTop: 12 }}>Apply Filters</button>
+      <button onClick={onApply} style={{ marginTop: 12 }}>
+        Apply Filters
+      </button>
     </div>
   );
 };
@@ -204,6 +204,7 @@ const Dashboard = () => {
   const [dataMap, setDataMap] = useState({});
   const [loadingMap, setLoadingMap] = useState({});
   const [trigger, setTrigger] = useState(0);
+  const [paginationMap, setPaginationMap] = useState({}); // boxId → page number
 
   const applyFilters = () => {
     setFilters(tempFilters);
@@ -222,6 +223,7 @@ const Dashboard = () => {
         const parsed = cfg.parseResponse(raw);
 
         setDataMap((prev) => ({ ...prev, [cfg.id]: parsed }));
+        setPaginationMap((prev) => ({ ...prev, [cfg.id]: 0 })); // reset page
       } catch (err) {
         console.error(err);
         setDataMap((prev) => ({ ...prev, [cfg.id]: null }));
@@ -237,13 +239,28 @@ const Dashboard = () => {
       <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: 16, padding: 16 }}>
         {dashboardConfig.map((cfg) => {
           const Renderer = cfg.Renderer;
-          const loading = loadingMap[cfg.id];
           const data = dataMap[cfg.id];
+          const loading = loadingMap[cfg.id];
+          const currentPage = paginationMap[cfg.id] || 0;
+
+          const handlePageChange = (newPage) => {
+            if (newPage < 0) return;
+            setPaginationMap((prev) => ({ ...prev, [cfg.id]: newPage }));
+          };
 
           return (
             <div key={cfg.id} style={{ flex: 1, minWidth: 300 }}>
               <h3>{cfg.title}</h3>
-              {loading ? <div>Loading...</div> : <Renderer parsed={data} />}
+              {loading ? (
+                <div>Loading...</div>
+              ) : (
+                <Renderer
+                  parsed={data}
+                  currentPage={currentPage}
+                  onPageChange={handlePageChange}
+                  pageSize={cfg.pageSize}
+                />
+              )}
             </div>
           );
         })}
