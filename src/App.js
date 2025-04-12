@@ -1,53 +1,25 @@
-import React, { useState, useEffect, createContext, useContext } from 'react';
-import AWS from 'aws-sdk';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
-// ------------------ AWS Athena Setup (Hardcoded creds for testing) ------------------
-AWS.config.update({
-  region: 'us-east-1',
-  accessKeyId: 'YOUR_AWS_ACCESS_KEY_ID',
-  secretAccessKey: 'YOUR_AWS_SECRET_ACCESS_KEY',
-});
-
-const athena = new AWS.Athena();
-
-const waitForQuery = async (QueryExecutionId) => {
-  while (true) {
-    const res = await athena.getQueryExecution({ QueryExecutionId }).promise();
-    const state = res.QueryExecution.Status.State;
-    if (state === 'SUCCEEDED') return;
-    if (['FAILED', 'CANCELLED'].includes(state)) throw new Error(`Athena query failed: ${state}`);
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-};
-
-const getQueryResults = async (QueryExecutionId) => {
-  const res = await athena.getQueryResults({ QueryExecutionId }).promise();
-  const [header, ...rows] = res.ResultSet.Rows;
-  const headers = header.Data.map((d) => d.VarCharValue);
-  return rows.map((row) => {
-    const values = row.Data.map((d) => d.VarCharValue || '');
-    return Object.fromEntries(values.map((v, i) => [headers[i], v]));
-  });
-};
-
-const athenaService = async (query, boxId) => {
-  const start = await athena.startQueryExecution({
-    QueryString: query,
-    QueryExecutionContext: { Database: 'your_athena_db' },
-    ResultConfiguration: {
-      OutputLocation: 's3://your-athena-results-bucket/',
-    },
-  }).promise();
-
-  await waitForQuery(start.QueryExecutionId);
-  return await getQueryResults(start.QueryExecutionId);
-};
-
-// ------------------ Context ------------------
+// ------------------ Filter Context ------------------
 const FilterContext = createContext();
+
+const FilterProvider = ({ children }) => {
+  const [filters, setFilters] = useState({
+    dateRange: 'last_7_days',
+    category: 'All',
+  });
+
+  return (
+    <FilterContext.Provider value={{ filters, setFilters }}>
+      {children}
+    </FilterContext.Provider>
+  );
+};
+
 const useFilters = () => useContext(FilterContext);
 
 // ------------------ UI Components ------------------
+
 const KPIBox = ({ parsed }) => {
   if (!parsed) return <div>No KPI Data</div>;
   return (
@@ -67,13 +39,17 @@ const TableBox = ({ parsed }) => {
       <table border="1" cellPadding={4}>
         <thead>
           <tr>
-            {parsed.headers.map((h) => <th key={h}>{h}</th>)}
+            {parsed.headers.map((h) => (
+              <th key={h}>{h}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {parsed.rows.map((row, i) => (
             <tr key={i}>
-              {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
+              {parsed.headers.map((h) => (
+                <td key={h}>{row[h]}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -93,11 +69,12 @@ const GraphBox = ({ parsed }) => {
 };
 
 // ------------------ Dashboard Config ------------------
+
 const dashboardConfig = [
   {
     id: 'revenue_kpi',
     title: 'Revenue',
-    baseSQL: 'SELECT label, value FROM revenue_summary LIMIT 1',
+    baseSQL: 'SELECT * FROM revenue',
     parseResponse: (raw) => {
       const item = raw[0] || {};
       return { title: 'Revenue', value: item.value, label: item.label };
@@ -105,9 +82,19 @@ const dashboardConfig = [
     Renderer: KPIBox,
   },
   {
+    id: 'growth_kpi',
+    title: 'Growth',
+    baseSQL: 'SELECT * FROM growth',
+    parseResponse: (raw) => {
+      const item = raw[0] || {};
+      return { title: 'Growth', value: item.value, label: item.label };
+    },
+    Renderer: KPIBox,
+  },
+  {
     id: 'employee_table',
     title: 'Employee Table',
-    baseSQL: 'SELECT name, department FROM employee_data LIMIT 10',
+    baseSQL: 'SELECT * FROM employee_data',
     parseResponse: (raw) => {
       const headers = Object.keys(raw[0] || {});
       return { headers, rows: raw };
@@ -117,13 +104,37 @@ const dashboardConfig = [
   {
     id: 'headcount_graph',
     title: 'Headcount Trend',
-    baseSQL: 'SELECT date, count FROM headcount ORDER BY date ASC',
+    baseSQL: 'SELECT * FROM headcount_timeseries',
     parseResponse: (raw) => ({ points: raw }),
     Renderer: GraphBox,
   },
 ];
 
+// ------------------ Athena Service ------------------
+
+const athenaService = async (query, boxId) => {
+  console.log(`Executing Athena Query for ${boxId}:`, query);
+  await new Promise((res) => setTimeout(res, Math.floor(Math.random() * (10000 - 1000 + 1)) + 1000)); // 3s delay
+
+  const mockData = {
+    revenue_kpi: [{ label: 'This Month', value: '$10,000' }],
+    growth_kpi: [{ label: 'YoY Growth', value: '15%' }],
+    employee_table: [
+      { name: 'Alice', department: 'Engineering' },
+      { name: 'Bob', department: 'HR' },
+    ],
+    headcount_graph: [
+      { date: '2024-01-01', count: 10 },
+      { date: '2024-02-01', count: 15 },
+      { date: '2024-03-01', count: 18 },
+    ],
+  };
+
+  return mockData[boxId] || [];
+};
+
 // ------------------ Query Builder ------------------
+
 const queryBuilder = (baseSQL, filters) => {
   let query = baseSQL;
   if (filters.dateRange) {
@@ -136,6 +147,7 @@ const queryBuilder = (baseSQL, filters) => {
 };
 
 // ------------------ Sidebar ------------------
+
 const Sidebar = ({ onApply }) => {
   const { filters, setFilters } = useFilters();
 
@@ -167,39 +179,38 @@ const Sidebar = ({ onApply }) => {
 };
 
 // ------------------ Dashboard ------------------
+
 const Dashboard = () => {
   const { filters } = useFilters();
   const [trigger, setTrigger] = useState(0);
   const [dataMap, setDataMap] = useState({});
   const [loadingMap, setLoadingMap] = useState({});
 
-  const applyFilters = () => setTrigger((t) => t + 1);
+  const applyFilters = () => setTrigger((prev) => prev + 1);
 
   useEffect(() => {
     let cancelled = false;
+
     const fetchAll = async () => {
-      const newLoading = {};
-      dashboardConfig.forEach((cfg) => (newLoading[cfg.id] = true));
-      setLoadingMap(newLoading);
+      const loadingState = {};
+      dashboardConfig.forEach((cfg) => (loadingState[cfg.id] = true));
+      setLoadingMap(loadingState);
 
       const results = await Promise.all(
         dashboardConfig.map(async (cfg) => {
-          try {
-            const query = queryBuilder(cfg.baseSQL, filters);
-            const raw = await athenaService(query, cfg.id);
-            const parsed = cfg.parseResponse(raw);
-            return { id: cfg.id, parsed };
-          } catch (e) {
-            console.error(`Error loading ${cfg.id}:`, e);
-            return { id: cfg.id, parsed: null };
-          }
+          const query = queryBuilder(cfg.baseSQL, filters);
+          const raw = await athenaService(query, cfg.id);
+          const parsed = cfg.parseResponse(raw, cfg);
+          return { id: cfg.id, parsed };
         })
       );
 
       if (!cancelled) {
-        const map = {};
-        results.forEach((r) => (map[r.id] = r.parsed));
-        setDataMap(map);
+        const resultMap = {};
+        results.forEach((r) => {
+          resultMap[r.id] = r.parsed;
+        });
+        setDataMap(resultMap);
         setLoadingMap({});
       }
     };
@@ -237,17 +248,11 @@ const Dashboard = () => {
 };
 
 // ------------------ App Root ------------------
-const App = () => {
-  const [filters, setFilters] = useState({
-    dateRange: 'last_7_days',
-    category: 'All',
-  });
 
-  return (
-    <FilterContext.Provider value={{ filters, setFilters }}>
-      <Dashboard />
-    </FilterContext.Provider>
-  );
-};
+const App = () => (
+  <FilterProvider>
+    <Dashboard />
+  </FilterProvider>
+);
 
 export default App;
