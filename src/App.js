@@ -1,11 +1,12 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import AWS from 'aws-sdk';
+import filtersConfig from './filtersConfig';
 
-// ------------------ AWS Athena Setup (Hardcoded creds for testing) ------------------
+// ---------- AWS Athena (dev only: do not hardcode in production) ----------
 AWS.config.update({
   region: 'us-east-1',
-  accessKeyId: 'YOUR_AWS_ACCESS_KEY_ID',
-  secretAccessKey: 'YOUR_AWS_SECRET_ACCESS_KEY',
+  accessKeyId: 'YOUR_ACCESS_KEY_ID',
+  secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',
 });
 
 const athena = new AWS.Athena();
@@ -31,6 +32,7 @@ const getQueryResults = async (QueryExecutionId) => {
 };
 
 const athenaService = async (query, boxId) => {
+  console.log(`[SQL for ${boxId}]: ${query}`);
   const start = await athena.startQueryExecution({
     QueryString: query,
     QueryExecutionContext: { Database: 'your_athena_db' },
@@ -43,56 +45,36 @@ const athenaService = async (query, boxId) => {
   return await getQueryResults(start.QueryExecutionId);
 };
 
-// ------------------ Context ------------------
+// ---------- Context ----------
 const FilterContext = createContext();
 const useFilters = () => useContext(FilterContext);
 
-// ------------------ UI Components ------------------
-const KPIBox = ({ parsed }) => {
-  if (!parsed) return <div>No KPI Data</div>;
-  return (
-    <div style={{ flex: 1, padding: 16, border: '1px solid #ddd' }}>
-      <h3>{parsed.title}</h3>
-      <p style={{ fontSize: 22, fontWeight: 'bold' }}>{parsed.value}</p>
-      <small>{parsed.label}</small>
-    </div>
-  );
+// ---------- Query Builder ----------
+const queryBuilder = (baseSQL, filters) => {
+  let query = baseSQL;
+  const clauses = [];
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (!value || value === 'All' || value.length === 0) return;
+    if (Array.isArray(value)) {
+      const filtered = value.filter((v) => v !== 'All');
+      if (filtered.length > 0) {
+        clauses.push(`${key} IN (${filtered.map((v) => `'${v}'`).join(', ')})`);
+      }
+    } else {
+      clauses.push(`${key} = '${value}'`);
+    }
+  });
+
+  if (clauses.length) {
+    query += baseSQL.toLowerCase().includes('where') ? ' AND ' : ' WHERE ';
+    query += clauses.join(' AND ');
+  }
+
+  return query;
 };
 
-const TableBox = ({ parsed }) => {
-  if (!parsed || !parsed.headers?.length) return <div>No Table Data</div>;
-  return (
-    <div style={{ flex: 2, padding: 16, border: '1px solid #ddd' }}>
-      <h3>Table</h3>
-      <table border="1" cellPadding={4}>
-        <thead>
-          <tr>
-            {parsed.headers.map((h) => <th key={h}>{h}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {parsed.rows.map((row, i) => (
-            <tr key={i}>
-              {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
-const GraphBox = ({ parsed }) => {
-  if (!parsed?.points?.length) return <div>No Graph Data</div>;
-  return (
-    <div style={{ flex: 2, padding: 16, border: '1px solid #ddd' }}>
-      <h3>Graph</h3>
-      <pre>{JSON.stringify(parsed.points, null, 2)}</pre>
-    </div>
-  );
-};
-
-// ------------------ Dashboard Config ------------------
+// ---------- Dashboard Config ----------
 const dashboardConfig = [
   {
     id: 'revenue_kpi',
@@ -102,7 +84,13 @@ const dashboardConfig = [
       const item = raw[0] || {};
       return { title: 'Revenue', value: item.value, label: item.label };
     },
-    Renderer: KPIBox,
+    Renderer: ({ parsed }) => (
+      <div style={{ padding: 16, border: '1px solid #ddd' }}>
+        <h3>{parsed?.title || 'N/A'}</h3>
+        <p style={{ fontSize: 22 }}>{parsed?.value || '--'}</p>
+        <small>{parsed?.label}</small>
+      </div>
+    ),
   },
   {
     id: 'employee_table',
@@ -112,103 +100,116 @@ const dashboardConfig = [
       const headers = Object.keys(raw[0] || {});
       return { headers, rows: raw };
     },
-    Renderer: TableBox,
+    Renderer: ({ parsed }) =>
+      !parsed?.headers?.length ? (
+        <div>No data</div>
+      ) : (
+        <table border="1" cellPadding={4}>
+          <thead>
+            <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
+          </thead>
+          <tbody>
+            {parsed.rows.map((row, i) => (
+              <tr key={i}>
+                {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ),
   },
   {
     id: 'headcount_graph',
     title: 'Headcount Trend',
     baseSQL: 'SELECT date, count FROM headcount ORDER BY date ASC',
     parseResponse: (raw) => ({ points: raw }),
-    Renderer: GraphBox,
+    Renderer: ({ parsed }) =>
+      !parsed?.points?.length ? (
+        <div>No graph data</div>
+      ) : (
+        <pre>{JSON.stringify(parsed.points, null, 2)}</pre>
+      ),
   },
 ];
 
-// ------------------ Query Builder ------------------
-const queryBuilder = (baseSQL, filters) => {
-  let query = baseSQL;
-  if (filters.dateRange) {
-    query += ` AND date_range = '${filters.dateRange}'`;
-  }
-  if (filters.category && filters.category !== 'All') {
-    query += ` AND category = '${filters.category}'`;
-  }
-  return query;
-};
-
-// ------------------ Sidebar ------------------
+// ---------- Sidebar ----------
 const Sidebar = ({ onApply }) => {
-  const { filters, setFilters } = useFilters();
+  const { tempFilters, setTempFilters } = useFilters();
 
-  const handleChange = (e) => {
-    setFilters({ ...filters, [e.target.name]: e.target.value });
+  const handleChange = (key, value) => {
+    setTempFilters((prev) => ({ ...prev, [key]: value }));
   };
 
   return (
-    <div style={{ width: 200, padding: 16, borderRight: '1px solid #ccc' }}>
+    <div style={{ width: 260, padding: 16, borderRight: '1px solid #ccc' }}>
       <h3>Filters</h3>
-      <label>Date Range:</label>
-      <select name="dateRange" value={filters.dateRange} onChange={handleChange}>
-        <option value="last_7_days">Last 7 Days</option>
-        <option value="last_30_days">Last 30 Days</option>
-      </select>
-
-      <br />
-      <label>Category:</label>
-      <select name="category" value={filters.category} onChange={handleChange}>
-        <option value="All">All</option>
-        <option value="Engineering">Engineering</option>
-        <option value="HR">HR</option>
-      </select>
-
-      <br />
+      {filtersConfig.map(({ key, label, type, options, placeholder }) => (
+        <div key={key}>
+          <label>{label}</label>
+          {type === 'multi-select' ? (
+            <select
+              value={tempFilters[key] || 'All'}
+              onChange={(e) => handleChange(key, [e.target.value])}
+            >
+              {options.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          ) : type === 'text' ? (
+            <input
+              type="text"
+              placeholder={placeholder}
+              value={tempFilters[key] || ''}
+              onChange={(e) => handleChange(key, e.target.value)}
+            />
+          ) : type === 'date' ? (
+            <input
+              type="date"
+              value={tempFilters[key] || ''}
+              onChange={(e) => handleChange(key, e.target.value)}
+            />
+          ) : null}
+        </div>
+      ))}
       <button onClick={onApply} style={{ marginTop: 12 }}>Apply Filters</button>
     </div>
   );
 };
 
-// ------------------ Dashboard ------------------
+// ---------- Dashboard ----------
 const Dashboard = () => {
-  const { filters } = useFilters();
-  const [trigger, setTrigger] = useState(0);
+  const { filters, tempFilters, setFilters } = useFilters();
   const [dataMap, setDataMap] = useState({});
   const [loadingMap, setLoadingMap] = useState({});
+  const [trigger, setTrigger] = useState(0);
 
-  const applyFilters = () => setTrigger((t) => t + 1);
+  const applyFilters = () => {
+    setFilters(tempFilters);
+    setTrigger((t) => t + 1);
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    const fetchAll = async () => {
-      const newLoading = {};
-      dashboardConfig.forEach((cfg) => (newLoading[cfg.id] = true));
-      setLoadingMap(newLoading);
+    if (!filters) return;
 
-      const results = await Promise.all(
-        dashboardConfig.map(async (cfg) => {
-          try {
-            const query = queryBuilder(cfg.baseSQL, filters);
-            const raw = await athenaService(query, cfg.id);
-            const parsed = cfg.parseResponse(raw);
-            return { id: cfg.id, parsed };
-          } catch (e) {
-            console.error(`Error loading ${cfg.id}:`, e);
-            return { id: cfg.id, parsed: null };
-          }
-        })
-      );
+    dashboardConfig.forEach(async (cfg) => {
+      setLoadingMap((prev) => ({ ...prev, [cfg.id]: true }));
 
-      if (!cancelled) {
-        const map = {};
-        results.forEach((r) => (map[r.id] = r.parsed));
-        setDataMap(map);
-        setLoadingMap({});
+      try {
+        const query = queryBuilder(cfg.baseSQL, filters);
+        const raw = await athenaService(query, cfg.id);
+        const parsed = cfg.parseResponse(raw);
+
+        setDataMap((prev) => ({ ...prev, [cfg.id]: parsed }));
+      } catch (err) {
+        console.error(err);
+        setDataMap((prev) => ({ ...prev, [cfg.id]: null }));
+      } finally {
+        setLoadingMap((prev) => ({ ...prev, [cfg.id]: false }));
       }
-    };
-
-    fetchAll();
-    return () => {
-      cancelled = true;
-    };
-  }, [trigger, filters]);
+    });
+  }, [trigger]);
 
   return (
     <div style={{ display: 'flex', height: '100vh' }}>
@@ -216,18 +217,13 @@ const Dashboard = () => {
       <div style={{ flex: 1, display: 'flex', flexWrap: 'wrap', gap: 16, padding: 16 }}>
         {dashboardConfig.map((cfg) => {
           const Renderer = cfg.Renderer;
-          const data = dataMap[cfg.id];
           const loading = loadingMap[cfg.id];
+          const data = dataMap[cfg.id];
 
           return (
             <div key={cfg.id} style={{ flex: 1, minWidth: 300 }}>
-              {loading ? (
-                <div style={{ padding: 16 }}>Loading {cfg.title}...</div>
-              ) : data ? (
-                <Renderer parsed={data} />
-              ) : (
-                <div style={{ padding: 16, color: 'red' }}>No data for {cfg.title}</div>
-              )}
+              <h3>{cfg.title}</h3>
+              {loading ? <div>Loading...</div> : <Renderer parsed={data} />}
             </div>
           );
         })}
@@ -236,15 +232,13 @@ const Dashboard = () => {
   );
 };
 
-// ------------------ App Root ------------------
+// ---------- App ----------
 const App = () => {
-  const [filters, setFilters] = useState({
-    dateRange: 'last_7_days',
-    category: 'All',
-  });
+  const [filters, setFilters] = useState({});
+  const [tempFilters, setTempFilters] = useState({});
 
   return (
-    <FilterContext.Provider value={{ filters, setFilters }}>
+    <FilterContext.Provider value={{ filters, setFilters, tempFilters, setTempFilters }}>
       <Dashboard />
     </FilterContext.Provider>
   );
