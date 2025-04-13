@@ -1,3 +1,5 @@
+// App.jsx
+
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import {
   AppLayout,
@@ -16,11 +18,35 @@ import {
 
 import filtersConfig from './filtersConfig';
 import { athenaService, queryBuilder } from './athenaService';
-import { tabbedDashboardConfig } from './tabbedConfig'
+import { tabbedDashboardConfig } from './tabbedConfig';
 
+// ----------------- Parsing Logic -----------------
+const parseKPI = (raw) => {
+  if (!raw) return { value: '--', label: 'No Data' };
+  return {
+    value: raw.value ?? '--',
+    label: raw.label ?? '',
+  };
+};
+
+const parseGraph = (raw) => {
+  if (!Array.isArray(raw)) return { x: [], y: [] };
+  const x = raw.map((r) => r.month || r.x || '');
+  const y = raw.map((r) => r.count || r.y || 0);
+  return { x, y };
+};
+
+const parseTable = (raw) => {
+  if (!Array.isArray(raw) || raw.length === 0) return { headers: [], rows: [] };
+  const headers = Object.keys(raw[0]);
+  return { headers, rows: raw };
+};
+
+// ----------------- Filter Context -----------------
 const FilterContext = createContext();
 const useFilters = () => useContext(FilterContext);
 
+// ----------------- KPI Box -----------------
 const KPIBox = ({ parsed, title }) => (
   <Box
     variant="container"
@@ -40,6 +66,7 @@ const KPIBox = ({ parsed, title }) => (
   </Box>
 );
 
+// ----------------- Data Table -----------------
 const DataTable = ({ parsed }) => {
   if (!parsed?.headers?.length) return <Box>No Data</Box>;
   return (
@@ -60,6 +87,7 @@ const DataTable = ({ parsed }) => {
   );
 };
 
+// ----------------- Filter Controls -----------------
 const FilterControls = ({ onApply }) => {
   const { tempFilters, setTempFilters } = useFilters();
   const handleChange = (key, value) => {
@@ -100,6 +128,7 @@ const FilterControls = ({ onApply }) => {
   );
 };
 
+// ----------------- Dashboard -----------------
 const Dashboard = () => {
   const { filters, tempFilters, setFilters } = useFilters();
   const [dataMap, setDataMap] = useState({});
@@ -123,7 +152,7 @@ const Dashboard = () => {
           try {
             const query = queryBuilder(item.baseSQL, filters);
             const raw = await athenaService(query, item.id);
-            const parsed = raw;
+            const parsed = section.type === 'kpi' ? parseKPI(raw) : parseGraph(raw);
             setDataMap((prev) => ({ ...prev, [item.id]: parsed }));
           } catch (err) {
             console.error(err);
@@ -138,8 +167,8 @@ const Dashboard = () => {
         try {
           const query = queryBuilder(section.baseSQL, filters);
           const raw = await athenaService(query, id);
-          const headers = Object.keys(raw[0] || {});
-          setDataMap((prev) => ({ ...prev, [id]: { headers, rows: raw } }));
+          const parsed = parseTable(raw);
+          setDataMap((prev) => ({ ...prev, [id]: parsed }));
         } catch (err) {
           console.error(err);
           setDataMap((prev) => ({ ...prev, [id]: null }));
@@ -158,8 +187,8 @@ const Dashboard = () => {
       <SpaceBetween size="l">
         {activeTab.sections.map((section) => (
           <ExpandableSection key={section.id} headerText={section.title} defaultExpanded>
-           {section.type === 'kpi' && (
-              <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}>
+            {section.type === 'kpi' && (
+              <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}> 
                 {section.items.map((item) => (
                   <KPIBox
                     key={item.id}
@@ -210,6 +239,7 @@ const Dashboard = () => {
   );
 };
 
+// ----------------- App -----------------
 const App = () => {
   const [filters, setFilters] = useState({});
   const [tempFilters, setTempFilters] = useState({});
