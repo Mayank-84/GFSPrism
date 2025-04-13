@@ -79,15 +79,37 @@ const KPIBox = ({ parsed, title }) => (
 // ----------------- Data Table -----------------
 const DataTable = ({ parsed }) => {
   const [currentPage, setCurrentPage] = useState(1);
-
   if (!parsed || !parsed.headers || !parsed.rows) return <Box>No Data</Box>;
 
   const pageSize = 10;
   const totalPages = Math.ceil(parsed.rows.length / pageSize);
   const paginatedRows = parsed.rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
+  const goToPage = (page) => {
+    if (page >= 1 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
+
   return (
     <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '400px' }}>
+      <Box margin={{ bottom: 's' }} display="flex" alignItems="center" justifyContent="space-between">
+        <SpaceBetween direction="horizontal" size="xs">
+          <Button
+            iconName="angle-left"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+            variant="icon"
+          />
+          <Box>Page {currentPage} of {totalPages}</Box>
+          <Button
+            iconName="angle-right"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+            variant="icon"
+          />
+        </SpaceBetween>
+      </Box>
       <Box margin={{ bottom: 's' }}>
         <SpaceBetween direction="horizontal" size="xs">
           {Array.from({ length: totalPages }, (_, i) => (
@@ -102,10 +124,9 @@ const DataTable = ({ parsed }) => {
           ))}
         </SpaceBetween>
       </Box>
-
-      <table style={{ width: 'auto', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
         <thead>
-          <tr>{parsed.headers.map((h) => <th key={h} style={{ whiteSpace: 'nowrap' }}>{h}</th>)}</tr>
+          <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
         </thead>
         <tbody>
           {paginatedRows.map((row, i) => (
