@@ -16,81 +16,27 @@ import {
 
 import filtersConfig from './filtersConfig';
 import { athenaService, queryBuilder } from './athenaService';
+import { tabbedDashboardConfig } from './tabbedConfig'
 
 const FilterContext = createContext();
 const useFilters = () => useContext(FilterContext);
 
-const tabbedDashboardConfig = [
-  {
-    id: 'headcount',
-    label: 'HeadCount',
-    sections: [
-      {
-        id: 'headcount_summary',
-        title: 'Headcount Summary',
-        type: 'kpi',
-        items: [
-          { id: 'hc_kpi_1', title: 'Total HC', baseSQL: 'SELECT label, value FROM total_hc LIMIT 1' },
-          { id: 'hc_kpi_2', title: 'Open Positions', baseSQL: 'SELECT label, value FROM open_positions LIMIT 1' },
-          { id: 'hc_kpi_3', title: 'Open Positions 3', baseSQL: 'SELECT label, value FROM open_positions LIMIT 1' }
-        ]
-      },
-      {
-        id: 'headcount_table',
-        title: 'Headcount Detail',
-        type: 'table',
-        baseSQL: 'SELECT * FROM headcount_details'
-      }
-    ]
-  },
-  {
-    id: 'hc',
-    label: 'HC',
-    sections: [
-      {
-        id: 'hc_stats',
-        title: 'HC Stats',
-        type: 'kpi',
-        items: [
-          { id: 'hc_stat_1', title: 'New Joinees', baseSQL: 'SELECT label, value FROM new_joinees LIMIT 1' },
-          { id: 'hc_stat_2', title: 'Exits', baseSQL: 'SELECT label, value FROM exits LIMIT 1' }
-        ]
-      }
-    ]
-  },
-  {
-    id: 'imr',
-    label: 'IMR',
-    sections: [
-      {
-        id: 'imr_summary',
-        title: 'IMR Overview',
-        type: 'table',
-        baseSQL: 'SELECT * FROM imr_summary'
-      }
-    ]
-  },
-  {
-    id: 'cognos',
-    label: 'Cognos',
-    sections: [
-      {
-        id: 'cognos_metrics',
-        title: 'Cognos Metrics',
-        type: 'kpi',
-        items: [
-          { id: 'cognos_metric_1', title: 'Utilization', baseSQL: 'SELECT label, value FROM utilization LIMIT 1' }
-        ]
-      }
-    ]
-  }
-];
-
 const KPIBox = ({ parsed, title }) => (
-  <Box variant="container" padding="m">
-    <Header variant="h4">{title}</Header>
-    <p style={{ fontSize: 22 }}>{parsed?.value || '--'}</p>
-    <small>{parsed?.label}</small>
+  <Box
+    variant="container"
+    padding="m"
+    textAlign="center"
+    style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      border: '2px solid black',
+      borderRadius: 8
+    }}
+  >
+    <Box variant="awsui-key-label" margin={{ bottom: 'xxs' }}>{title}</Box>
+    <Box fontWeight="bold" fontSize="display-l">{parsed?.value || '--'}</Box>
+    <Box variant="small">{parsed?.label}</Box>
   </Box>
 );
 
@@ -124,8 +70,8 @@ const FilterControls = ({ onApply }) => {
     <SpaceBetween size="m">
       <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}> 
         {filtersConfig.map(({ key, label, type, options, placeholder }) => (
-          <div key={key}>
-            <Box variant="awsui-key-label">{label}</Box>
+          <Box key={key} padding={{ bottom: 's' }}>
+            <Box variant="awsui-key-label" margin={{ bottom: 'xxs' }}>{label}</Box>
             {type === 'multi-select' || type === 'select' ? (
               <Select
                 selectedOption={{ label: tempFilters[key] || 'All', value: tempFilters[key] || 'All' }}
@@ -144,7 +90,7 @@ const FilterControls = ({ onApply }) => {
                 onChange={({ detail }) => handleChange(key, detail.value)}
               />
             ) : null}
-          </div>
+          </Box>
         ))}
       </Grid>
       <Box>
@@ -171,13 +117,13 @@ const Dashboard = () => {
     if (!filters || !activeTab) return;
 
     activeTab.sections.forEach(async (section) => {
-      if (section.type === 'kpi') {
-        for (const item of section.items) {
+      if (section.type === 'kpi' || section.type === 'graph') {
+        for (const item of section.items || [section]) {
           setLoadingMap((prev) => ({ ...prev, [item.id]: true }));
           try {
             const query = queryBuilder(item.baseSQL, filters);
             const raw = await athenaService(query, item.id);
-            const parsed = raw[0] || {};
+            const parsed = raw;
             setDataMap((prev) => ({ ...prev, [item.id]: parsed }));
           } catch (err) {
             console.error(err);
@@ -212,8 +158,8 @@ const Dashboard = () => {
       <SpaceBetween size="l">
         {activeTab.sections.map((section) => (
           <ExpandableSection key={section.id} headerText={section.title} defaultExpanded>
-            {section.type === 'kpi' && (
-              <SpaceBetween direction="horizontal" size="l">
+           {section.type === 'kpi' && (
+              <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}>
                 {section.items.map((item) => (
                   <KPIBox
                     key={item.id}
@@ -222,11 +168,18 @@ const Dashboard = () => {
                     loading={loadingMap[item.id]}
                   />
                 ))}
-              </SpaceBetween>
+              </Grid>
             )}
             {section.type === 'table' && (
               <Container>
                 {loadingMap[section.id] ? <Box>Loading...</Box> : <DataTable parsed={dataMap[section.id]} />}
+              </Container>
+            )}
+            {section.type === 'graph' && (
+              <Container>
+                {loadingMap[section.id] ? <Box>Loading...</Box> : (
+                  <pre>{JSON.stringify(dataMap[section.id], null, 2)}</pre>
+                )}
               </Container>
             )}
           </ExpandableSection>
