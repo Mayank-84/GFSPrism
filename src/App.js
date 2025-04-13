@@ -79,9 +79,10 @@ const KPIBox = ({ parsed, title }) => (
 // ----------------- Data Table -----------------
 const DataTable = ({ parsed }) => {
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
   if (!parsed || !parsed.headers || !parsed.rows) return <Box>No Data</Box>;
 
-  const pageSize = 10;
   const totalPages = Math.ceil(parsed.rows.length / pageSize);
   const paginatedRows = parsed.rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
@@ -93,7 +94,17 @@ const DataTable = ({ parsed }) => {
 
   return (
     <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '400px' }}>
-      <Box margin={{ bottom: 's' }} display="flex" alignItems="center" justifyContent="space-between">
+      <Box margin={{ bottom: 's' }} display="flex" justifyContent="space-between" alignItems="center">
+        <Box>
+          <Select
+            selectedOption={{ label: `${pageSize}`, value: `${pageSize}` }}
+            onChange={({ detail }) => {
+              setPageSize(Number(detail.selectedOption.value));
+              setCurrentPage(1);
+            }}
+            options={[10, 20, 30, 50].map((v) => ({ label: `${v}`, value: `${v}` }))}
+          />
+        </Box>
         <SpaceBetween direction="horizontal" size="xs">
           <Button
             iconName="angle-left"
@@ -110,27 +121,13 @@ const DataTable = ({ parsed }) => {
           />
         </SpaceBetween>
       </Box>
-      <Box margin={{ bottom: 's' }}>
-        <SpaceBetween direction="horizontal" size="xs">
-          {Array.from({ length: totalPages }, (_, i) => (
-            <Button
-              key={i}
-              onClick={() => setCurrentPage(i + 1)}
-              variant={currentPage === i + 1 ? 'primary' : 'normal'}
-              size="small"
-            >
-              {i + 1}
-            </Button>
-          ))}
-        </SpaceBetween>
-      </Box>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
+      <table style={{ tableLayout: 'auto', width: '100%', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
         <thead>
-          <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
+          <tr>{parsed.headers.map((h) => <th key={h} style={{ whiteSpace: 'nowrap', padding: '8px' }}>{h}</th>)}</tr>
         </thead>
         <tbody>
           {paginatedRows.map((row, i) => (
-            <tr key={i} style={{ height: 'auto' }}>
+            <tr key={i}>
               {parsed.headers.map((h) => (
                 <td key={h} style={{ whiteSpace: 'nowrap', padding: '8px' }}>{row[h]}</td>
               ))}
