@@ -5,6 +5,8 @@
   "dependencies": {
     "@aws-sdk/client-athena": "^3.787.0",
     "@aws-sdk/credential-providers": "^3.787.0",
+    "@cloudscape-design/components": "^3.0.945",
+    "@cloudscape-design/global-styles": "^1.0.40",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.3.0",
