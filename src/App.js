@@ -1,4 +1,4 @@
-import React, { useState, useEffect, createContext, useContext, useRef } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
 import {
   AppLayout,
   Box,
@@ -99,13 +99,7 @@ const dashboardConfig = [
       const item = raw[0] || {};
       return { title: 'Revenue', value: item.value, label: item.label };
     },
-    Renderer: ({ parsed }) => (
-      <Box>
-        <h3>{parsed?.title || 'N/A'}</h3>
-        <p style={{ fontSize: 22 }}>{parsed?.value || '--'}</p>
-        <small>{parsed?.label}</small>
-      </Box>
-    ),
+    component: 'RevenueCard'
   },
   {
     id: 'headcount_table',
@@ -117,65 +111,73 @@ const dashboardConfig = [
       const headers = Object.keys(raw[0] || {});
       return { headers, rows: raw };
     },
-    Renderer: ({ parsed }) => {
-      if (!parsed?.headers?.length) return <Box>No Data</Box>;
-      return (
-        <div style={{ overflowY: 'auto', maxHeight: '400px' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
-            <thead>
-              <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
-            </thead>
-            <tbody>
-              {parsed.rows.map((row, i) => (
-                <tr key={i}>
-                  {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      );
-    },
+    component: 'HeadcountTable'
   },
 ];
 
-const Sidebar = ({ onApply }) => {
+const RevenueCard = ({ parsed }) => (
+  <Box>
+    <h3>{parsed?.title || 'N/A'}</h3>
+    <p style={{ fontSize: 22 }}>{parsed?.value || '--'}</p>
+    <small>{parsed?.label}</small>
+  </Box>
+);
+
+const HeadcountTable = ({ parsed }) => {
+  if (!parsed?.headers?.length) return <Box>No Data</Box>;
+  return (
+    <div style={{ overflowY: 'auto', maxHeight: '400px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
+        <thead>
+          <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {parsed.rows.map((row, i) => (
+            <tr key={i}>
+              {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
+const FilterControls = ({ onApply }) => {
   const { tempFilters, setTempFilters } = useFilters();
   const handleChange = (key, value) => {
     setTempFilters((prev) => ({ ...prev, [key]: value }));
   };
 
   return (
-    <ExpandableSection headerText="Filters" defaultExpanded={true}>
-      <Container>
-        <SpaceBetween size="m">
-          {filtersConfig.map(({ key, label, type, options, placeholder }) => (
-            <div key={key}>
-              <Box variant="awsui-key-label">{label}</Box>
-              {type === 'multi-select' || type === 'select' ? (
-                <Select
-                  selectedOption={{ label: tempFilters[key] || 'All', value: tempFilters[key] || 'All' }}
-                  onChange={({ detail }) => handleChange(key, detail.selectedOption.value)}
-                  options={options.map((opt) => ({ label: opt, value: opt }))}
-                />
-              ) : type === 'text' ? (
-                <Input
-                  value={tempFilters[key] || ''}
-                  onChange={({ detail }) => handleChange(key, detail.value)}
-                  placeholder={placeholder}
-                />
-              ) : type === 'date' ? (
-                <DatePicker
-                  value={tempFilters[key] || ''}
-                  onChange={({ detail }) => handleChange(key, detail.value)}
-                />
-              ) : null}
-            </div>
-          ))}
-          <Button variant="primary" onClick={onApply}>Apply Filters</Button>
-        </SpaceBetween>
-      </Container>
-    </ExpandableSection>
+    <Container header={<Header variant="h3">Controls</Header>}>
+      <SpaceBetween size="m">
+        {filtersConfig.map(({ key, label, type, options, placeholder }) => (
+          <div key={key}>
+            <Box variant="awsui-key-label">{label}</Box>
+            {type === 'multi-select' || type === 'select' ? (
+              <Select
+                selectedOption={{ label: tempFilters[key] || 'All', value: tempFilters[key] || 'All' }}
+                onChange={({ detail }) => handleChange(key, detail.selectedOption.value)}
+                options={options.map((opt) => ({ label: opt, value: opt }))}
+              />
+            ) : type === 'text' ? (
+              <Input
+                value={tempFilters[key] || ''}
+                onChange={({ detail }) => handleChange(key, detail.value)}
+                placeholder={placeholder}
+              />
+            ) : type === 'date' ? (
+              <DatePicker
+                value={tempFilters[key] || ''}
+                onChange={({ detail }) => handleChange(key, detail.value)}
+              />
+            ) : null}
+          </div>
+        ))}
+        <Button variant="primary" onClick={onApply}>Apply Filters</Button>
+      </SpaceBetween>
+    </Container>
   );
 };
 
@@ -208,19 +210,26 @@ const Dashboard = () => {
     });
   }, [trigger]);
 
+  const componentMap = {
+    RevenueCard,
+    HeadcountTable,
+  };
+
   return (
     <AppLayout
-      navigation={<Sidebar onApply={applyFilters} />}
       content={
         <SpaceBetween size="l" direction="vertical" className="p-4">
+          <FilterControls onApply={applyFilters} />
           {dashboardConfig.map((cfg) => {
-            const Renderer = cfg.Renderer;
+            const Component = componentMap[cfg.component];
             const data = dataMap[cfg.id];
             const loading = loadingMap[cfg.id];
             return (
-              <Container key={cfg.id} header={<Header variant="h3">{cfg.title}</Header>}>
-                {loading ? <Box>Loading...</Box> : <Renderer parsed={data} />}
-              </Container>
+              <ExpandableSection key={cfg.id} headerText={cfg.title} defaultExpanded>
+                <Container>
+                  {loading ? <Box>Loading...</Box> : <Component parsed={data} />}
+                </Container>
+              </ExpandableSection>
             );
           })}
         </SpaceBetween>
