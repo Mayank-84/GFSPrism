@@ -9,121 +9,92 @@ import {
   SpaceBetween,
   Input,
   DatePicker,
-  ExpandableSection
+  ExpandableSection,
+  Tabs,
+  Grid
 } from '@cloudscape-design/components';
-import {
-  AthenaClient,
-  StartQueryExecutionCommand,
-  GetQueryExecutionCommand,
-  GetQueryResultsCommand,
-} from '@aws-sdk/client-athena';
 
 import filtersConfig from './filtersConfig';
-
-const athena = new AthenaClient({
-  region: 'us-east-1',
-  credentials: {
-    accessKeyId: 'YOUR_ACCESS_KEY_ID',
-    secretAccessKey: 'YOUR_SECRET_ACCESS_KEY',
-  },
-});
-
-const waitForQuery = async (executionId) => {
-  while (true) {
-    const { QueryExecution } = await athena.send(new GetQueryExecutionCommand({ QueryExecutionId: executionId }));
-    const state = QueryExecution.Status.State;
-    if (state === 'SUCCEEDED') return;
-    if (state === 'FAILED' || state === 'CANCELLED') throw new Error(`Query ${state}`);
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-};
-
-const getQueryResults = async (executionId) => {
-  const { ResultSet } = await athena.send(new GetQueryResultsCommand({ QueryExecutionId: executionId }));
-  const [header, ...rows] = ResultSet.Rows;
-  const headers = header.Data.map((d) => d.VarCharValue);
-  return rows.map((row) => {
-    const values = row.Data.map((d) => d.VarCharValue || '');
-    return Object.fromEntries(values.map((v, i) => [headers[i], v]));
-  });
-};
-
-const athenaService = async (query, boxId) => {
-  console.log(`[SQL for ${boxId}] → ${query}`);
-  const start = await athena.send(
-    new StartQueryExecutionCommand({
-      QueryString: query,
-      QueryExecutionContext: { Database: 'your_athena_db' },
-      ResultConfiguration: {
-        OutputLocation: 's3://your-athena-results-bucket/',
-      },
-    })
-  );
-  await waitForQuery(start.QueryExecutionId);
-  return await getQueryResults(start.QueryExecutionId);
-};
+import { athenaService, queryBuilder } from './athenaService';
 
 const FilterContext = createContext();
 const useFilters = () => useContext(FilterContext);
 
-const queryBuilder = (baseSQL, filters) => {
-  let query = baseSQL;
-  const clauses = [];
-
-  Object.entries(filters).forEach(([key, value]) => {
-    if (!value || value === 'All' || value.length === 0) return;
-    if (Array.isArray(value)) {
-      const filtered = value.filter((v) => v !== 'All');
-      if (filtered.length > 0) {
-        clauses.push(`${key} IN (${filtered.map((v) => `'${v}'`).join(', ')})`);
+const tabbedDashboardConfig = [
+  {
+    id: 'headcount',
+    label: 'HeadCount',
+    sections: [
+      {
+        id: 'headcount_summary',
+        title: 'Headcount Summary',
+        type: 'kpi',
+        items: [
+          { id: 'hc_kpi_1', title: 'Total HC', baseSQL: 'SELECT label, value FROM total_hc LIMIT 1' },
+          { id: 'hc_kpi_2', title: 'Open Positions', baseSQL: 'SELECT label, value FROM open_positions LIMIT 1' },
+          { id: 'hc_kpi_3', title: 'Open Positions 3', baseSQL: 'SELECT label, value FROM open_positions LIMIT 1' }
+        ]
+      },
+      {
+        id: 'headcount_table',
+        title: 'Headcount Detail',
+        type: 'table',
+        baseSQL: 'SELECT * FROM headcount_details'
       }
-    } else {
-      clauses.push(`${key} = '${value}'`);
-    }
-  });
-
-  if (clauses.length) {
-    query += baseSQL.toLowerCase().includes('where') ? ' AND ' : ' WHERE ';
-    query += clauses.join(' AND ');
+    ]
+  },
+  {
+    id: 'hc',
+    label: 'HC',
+    sections: [
+      {
+        id: 'hc_stats',
+        title: 'HC Stats',
+        type: 'kpi',
+        items: [
+          { id: 'hc_stat_1', title: 'New Joinees', baseSQL: 'SELECT label, value FROM new_joinees LIMIT 1' },
+          { id: 'hc_stat_2', title: 'Exits', baseSQL: 'SELECT label, value FROM exits LIMIT 1' }
+        ]
+      }
+    ]
+  },
+  {
+    id: 'imr',
+    label: 'IMR',
+    sections: [
+      {
+        id: 'imr_summary',
+        title: 'IMR Overview',
+        type: 'table',
+        baseSQL: 'SELECT * FROM imr_summary'
+      }
+    ]
+  },
+  {
+    id: 'cognos',
+    label: 'Cognos',
+    sections: [
+      {
+        id: 'cognos_metrics',
+        title: 'Cognos Metrics',
+        type: 'kpi',
+        items: [
+          { id: 'cognos_metric_1', title: 'Utilization', baseSQL: 'SELECT label, value FROM utilization LIMIT 1' }
+        ]
+      }
+    ]
   }
-
-  return query;
-};
-
-const dashboardConfig = [
-  {
-    id: 'revenue_kpi',
-    title: 'Revenue',
-    baseSQL: 'SELECT label, value FROM revenue_summary LIMIT 1',
-    parseResponse: (raw) => {
-      const item = raw[0] || {};
-      return { title: 'Revenue', value: item.value, label: item.label };
-    },
-    component: 'RevenueCard'
-  },
-  {
-    id: 'headcount_table',
-    title: 'Headcount Table',
-    baseSQL: 'SELECT * FROM headcount',
-    frontendPagination: true,
-    pageSize: 10,
-    parseResponse: (raw) => {
-      const headers = Object.keys(raw[0] || {});
-      return { headers, rows: raw };
-    },
-    component: 'HeadcountTable'
-  },
 ];
 
-const RevenueCard = ({ parsed }) => (
-  <Box>
-    <h3>{parsed?.title || 'N/A'}</h3>
+const KPIBox = ({ parsed, title }) => (
+  <Box variant="container" padding="m">
+    <Header variant="h4">{title}</Header>
     <p style={{ fontSize: 22 }}>{parsed?.value || '--'}</p>
     <small>{parsed?.label}</small>
   </Box>
 );
 
-const HeadcountTable = ({ parsed }) => {
+const DataTable = ({ parsed }) => {
   if (!parsed?.headers?.length) return <Box>No Data</Box>;
   return (
     <div style={{ overflowY: 'auto', maxHeight: '400px' }}>
@@ -150,8 +121,8 @@ const FilterControls = ({ onApply }) => {
   };
 
   return (
-    <Container header={<Header variant="h3">Controls</Header>}>
-      <SpaceBetween size="m">
+    <SpaceBetween size="m">
+      <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}> 
         {filtersConfig.map(({ key, label, type, options, placeholder }) => (
           <div key={key}>
             <Box variant="awsui-key-label">{label}</Box>
@@ -175,9 +146,11 @@ const FilterControls = ({ onApply }) => {
             ) : null}
           </div>
         ))}
+      </Grid>
+      <Box>
         <Button variant="primary" onClick={onApply}>Apply Filters</Button>
-      </SpaceBetween>
-    </Container>
+      </Box>
+    </SpaceBetween>
   );
 };
 
@@ -186,6 +159,7 @@ const Dashboard = () => {
   const [dataMap, setDataMap] = useState({});
   const [loadingMap, setLoadingMap] = useState({});
   const [trigger, setTrigger] = useState(0);
+  const [activeTabId, setActiveTabId] = useState('headcount');
 
   const applyFilters = () => {
     setFilters(tempFilters);
@@ -193,45 +167,90 @@ const Dashboard = () => {
   };
 
   useEffect(() => {
-    if (!filters) return;
-    dashboardConfig.forEach(async (cfg) => {
-      setLoadingMap((prev) => ({ ...prev, [cfg.id]: true }));
-      try {
-        const query = queryBuilder(cfg.baseSQL, filters);
-        const raw = await athenaService(query, cfg.id);
-        const parsed = cfg.parseResponse(raw);
-        setDataMap((prev) => ({ ...prev, [cfg.id]: parsed }));
-      } catch (err) {
-        console.error(err);
-        setDataMap((prev) => ({ ...prev, [cfg.id]: null }));
-      } finally {
-        setLoadingMap((prev) => ({ ...prev, [cfg.id]: false }));
+    const activeTab = tabbedDashboardConfig.find((tab) => tab.id === activeTabId);
+    if (!filters || !activeTab) return;
+
+    activeTab.sections.forEach(async (section) => {
+      if (section.type === 'kpi') {
+        for (const item of section.items) {
+          setLoadingMap((prev) => ({ ...prev, [item.id]: true }));
+          try {
+            const query = queryBuilder(item.baseSQL, filters);
+            const raw = await athenaService(query, item.id);
+            const parsed = raw[0] || {};
+            setDataMap((prev) => ({ ...prev, [item.id]: parsed }));
+          } catch (err) {
+            console.error(err);
+            setDataMap((prev) => ({ ...prev, [item.id]: null }));
+          } finally {
+            setLoadingMap((prev) => ({ ...prev, [item.id]: false }));
+          }
+        }
+      } else if (section.type === 'table') {
+        const id = section.id;
+        setLoadingMap((prev) => ({ ...prev, [id]: true }));
+        try {
+          const query = queryBuilder(section.baseSQL, filters);
+          const raw = await athenaService(query, id);
+          const headers = Object.keys(raw[0] || {});
+          setDataMap((prev) => ({ ...prev, [id]: { headers, rows: raw } }));
+        } catch (err) {
+          console.error(err);
+          setDataMap((prev) => ({ ...prev, [id]: null }));
+        } finally {
+          setLoadingMap((prev) => ({ ...prev, [id]: false }));
+        }
       }
     });
-  }, [trigger]);
+  }, [trigger, activeTabId]);
 
-  const componentMap = {
-    RevenueCard,
-    HeadcountTable,
+  const renderTabContent = () => {
+    const activeTab = tabbedDashboardConfig.find((tab) => tab.id === activeTabId);
+    if (!activeTab) return null;
+
+    return (
+      <SpaceBetween size="l">
+        {activeTab.sections.map((section) => (
+          <ExpandableSection key={section.id} headerText={section.title} defaultExpanded>
+            {section.type === 'kpi' && (
+              <SpaceBetween direction="horizontal" size="l">
+                {section.items.map((item) => (
+                  <KPIBox
+                    key={item.id}
+                    title={item.title}
+                    parsed={dataMap[item.id]}
+                    loading={loadingMap[item.id]}
+                  />
+                ))}
+              </SpaceBetween>
+            )}
+            {section.type === 'table' && (
+              <Container>
+                {loadingMap[section.id] ? <Box>Loading...</Box> : <DataTable parsed={dataMap[section.id]} />}
+              </Container>
+            )}
+          </ExpandableSection>
+        ))}
+      </SpaceBetween>
+    );
   };
 
   return (
     <AppLayout
       content={
         <SpaceBetween size="l" direction="vertical" className="p-4">
-          <FilterControls onApply={applyFilters} />
-          {dashboardConfig.map((cfg) => {
-            const Component = componentMap[cfg.component];
-            const data = dataMap[cfg.id];
-            const loading = loadingMap[cfg.id];
-            return (
-              <ExpandableSection key={cfg.id} headerText={cfg.title} defaultExpanded>
-                <Container>
-                  {loading ? <Box>Loading...</Box> : <Component parsed={data} />}
-                </Container>
-              </ExpandableSection>
-            );
-          })}
+          <ExpandableSection headerText="Controls" defaultExpanded>
+            <FilterControls onApply={applyFilters} />
+          </ExpandableSection>
+          <Tabs
+            tabs={tabbedDashboardConfig.map((tab) => ({
+              id: tab.id,
+              label: tab.label,
+              content: renderTabContent()
+            }))}
+            activeTabId={activeTabId}
+            onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+          />
         </SpaceBetween>
       }
     />
