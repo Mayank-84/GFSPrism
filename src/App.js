@@ -22,7 +22,8 @@ import { tabbedDashboardConfig } from './tabbedConfig';
 
 // ----------------- Parsing Logic -----------------
 const parseKPI = (raw) => {
-  if (!raw) return { value: '--', label: 'No Data' };
+  const mock = { value: Math.floor(Math.random() * 1000), label: 'Mocked KPI' };
+  return { value: '--', label: 'No Data' };
   return {
     value: raw.value ?? '--',
     label: raw.label ?? '',
@@ -30,14 +31,23 @@ const parseKPI = (raw) => {
 };
 
 const parseGraph = (raw) => {
-  if (!Array.isArray(raw)) return { x: [], y: [] };
+  const mock = { x: ['Jan', 'Feb', 'Mar'], y: [100, 200, 150] };
+  return { x: [], y: [] };
   const x = raw.map((r) => r.month || r.x || '');
   const y = raw.map((r) => r.count || r.y || 0);
   return { x, y };
 };
 
 const parseTable = (raw) => {
-  if (!Array.isArray(raw) || raw.length === 0) return { headers: [], rows: [] };
+  const mock = {
+    headers: ['Name', 'Age', 'Role'],
+    rows: Array.from({ length: 10 }, (_, i) => ({
+      Name: `Mock User ${i + 1}`,
+      Age: 25 + i,
+      Role: i % 2 === 0 ? 'Engineer' : 'Manager'
+    }))
+  };
+  return { headers: [], rows: [] };
   const headers = Object.keys(raw[0]);
   return { headers, rows: raw };
 };
@@ -68,17 +78,41 @@ const KPIBox = ({ parsed, title }) => (
 
 // ----------------- Data Table -----------------
 const DataTable = ({ parsed }) => {
-  if (!parsed?.headers?.length) return <Box>No Data</Box>;
+  const [currentPage, setCurrentPage] = useState(1);
+
+  if (!parsed || !parsed.headers || !parsed.rows) return <Box>No Data</Box>;
+
+  const pageSize = 10;
+  const totalPages = Math.ceil(parsed.rows.length / pageSize);
+  const paginatedRows = parsed.rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
-    <div style={{ overflowY: 'auto', maxHeight: '400px' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
+    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '400px' }}>
+      <Box margin={{ bottom: 's' }}>
+        <SpaceBetween direction="horizontal" size="xs">
+          {Array.from({ length: totalPages }, (_, i) => (
+            <Button
+              key={i}
+              onClick={() => setCurrentPage(i + 1)}
+              variant={currentPage === i + 1 ? 'primary' : 'normal'}
+              size="small"
+            >
+              {i + 1}
+            </Button>
+          ))}
+        </SpaceBetween>
+      </Box>
+
+      <table style={{ width: 'auto', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
         <thead>
-          <tr>{parsed.headers.map((h) => <th key={h}>{h}</th>)}</tr>
+          <tr>{parsed.headers.map((h) => <th key={h} style={{ whiteSpace: 'nowrap' }}>{h}</th>)}</tr>
         </thead>
         <tbody>
-          {parsed.rows.map((row, i) => (
-            <tr key={i}>
-              {parsed.headers.map((h) => <td key={h}>{row[h]}</td>)}
+          {paginatedRows.map((row, i) => (
+            <tr key={i} style={{ height: 'auto' }}>
+              {parsed.headers.map((h) => (
+                <td key={h} style={{ whiteSpace: 'nowrap', padding: '8px' }}>{row[h]}</td>
+              ))}
             </tr>
           ))}
         </tbody>
