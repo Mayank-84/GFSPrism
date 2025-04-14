@@ -49,7 +49,17 @@ import {
   };
   
   export const queryBuilder = (baseSQL, filters) => {
-    let query = baseSQL;
+    let query = baseSQL.trim();
+  
+    // Extract and remove LIMIT if present
+    const limitMatch = query.match(/limit\s+\d+/i);
+    let limitClause = '';
+    if (limitMatch) {
+      limitClause = limitMatch[0];
+      query = query.replace(limitMatch[0], '').trim(); // Remove limit from original position
+    }
+  
+    // Prepare filter clauses
     const clauses = [];
   
     Object.entries(filters).forEach(([key, value]) => {
@@ -57,25 +67,37 @@ import {
   
       if (Array.isArray(value)) {
         const values = value
-          .map((v) => typeof v === 'object' ? v.value : v)
+          .map((v) => (typeof v === 'object' ? v.value : v))
           .filter((v) => v !== 'All' && v !== '__select_all__');
   
         if (values.length > 0) {
           clauses.push(`${key} IN (${values.map((v) => `'${v}'`).join(', ')})`);
         }
       } else {
-        if (typeof value === 'object' && value.value) {
-          clauses.push(`${key} = '${value.value}'`);
-        } else {
-          clauses.push(`${key} = '${value}'`);
-        }
+        const val = typeof value === 'object' && value.value ? value.value : value;
+        clauses.push(`${key} = '${val}'`);
       }
     });
   
-    if (clauses.length) {
-      query += baseSQL.toLowerCase().includes('where') ? ' AND ' : ' WHERE ';
-      query += clauses.join(' AND ');
+    // Inject filters either in WHERE or HAVING clause
+    if (clauses.length > 0) {
+      const lowerSQL = query.toLowerCase();
+      const clauseStr = clauses.join(' AND ');
+  
+      if (lowerSQL.includes('group by')) {
+        query += lowerSQL.includes('having') ? ' AND ' : ' HAVING ';
+      } else {
+        query += lowerSQL.includes('where') ? ' AND ' : ' WHERE ';
+      }
+  
+      query += clauseStr;
     }
   
-    return query;  
+    // Append LIMIT at the end
+    if (limitClause) {
+      query += ` ${limitClause}`;
+    }
+  
+    return query;
   };
+  
