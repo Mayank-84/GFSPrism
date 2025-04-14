@@ -152,27 +152,46 @@ const FilterControls = ({ onApply }) => {
                 selectedOptions={(() => {
                   const options = filterOptions[key] || [];
                   const selected = tempFilters[key] || [];
+
+                  if (selected.length === 0 && options.length > 0) {
+                    return [{ label: 'Select All', value: '__select_all__' }];
+                  }
+
                   const allSelected = selected.length === options.length;
-                  return allSelected ? [{ label: 'Select All', value: '__select_all__' }] : selected;
+                  return allSelected
+                    ? [{ label: 'Unselect All', value: '__select_all__' }, ...selected]
+                    : selected;
                 })()}
                 onFocus={() => sql && loadOptionsForFilter(key, sql)}
                 onChange={({ detail }) => {
                   const allOptions = filterOptions[key] || [];
                   const selected = detail.selectedOptions;
-                  const isSelectAllClicked = selected.some((opt) => opt.value === '__select_all__');
-                  const allSelected = (tempFilters[key] || []).length === allOptions.length;
+                  const isSelectAllClicked = selected.find((opt) => opt.value === '__select_all__');
+                  const current = tempFilters[key] || [];
+                  const allSelected = current.length === allOptions.length;
 
-                  handleChange(
-                    key,
-                    isSelectAllClicked ? (allSelected ? [] : allOptions) : selected
-                  );
+                  if (isSelectAllClicked) {
+                    handleChange(key, allSelected ? [] : allOptions);
+                  } else {
+                    const filtered = selected.filter((opt) => opt.value !== '__select_all__');
+                    handleChange(key, filtered);
+                  }
                 }}
                 loadingText="Loading..."
                 statusType={isLoadingFilters[key] ? 'loading' : 'finished'}
-                options={[{ label: 'Select All', value: '__select_all__' }, ...(filterOptions[key] || [])]}
+                options={[
+                  {
+                    label:
+                      (tempFilters[key] || []).length === (filterOptions[key] || []).length
+                        ? 'Unselect All'
+                        : 'Select All',
+                    value: '__select_all__',
+                  },
+                  ...(filterOptions[key] || []),
+                ]}
                 placeholder={`Select ${label}`}
                 filteringType="auto"
-                tokenLimit={0} // ✅ No preview under the dropdown
+                tokenLimit={0} // ✅ Hide token preview under the dropdown
               />
             ) : type === 'text' ? (
               <Input
