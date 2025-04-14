@@ -8,6 +8,7 @@ import {
   Container,
   Header,
   Multiselect,
+  Select,
   SpaceBetween,
   Input,
   DatePicker,
@@ -79,10 +80,10 @@ const DataTable = ({ parsed }) => {
   return (
     <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '400px' }}>
       <Box margin={{ bottom: 's' }} display="flex" justifyContent="space-between" alignItems="center">
-        <Multiselect
-          selectedOptions={[{ label: `${pageSize}`, value: `${pageSize}` }]}
+          <Select
+          selectedOption={{ label: `${pageSize}`, value: `${pageSize}` }}
           onChange={({ detail }) => {
-            setPageSize(Number(detail.selectedOptions[0].value));
+            setPageSize(Number(detail.selectedOption.value));
             setCurrentPage(1);
           }}
           options={[10, 20, 30, 50].map((v) => ({ label: `${v}`, value: `${v}` }))}
@@ -116,97 +117,86 @@ const DataTable = ({ parsed }) => {
 const FilterControls = ({ onApply }) => {
   const { tempFilters, setTempFilters } = useFilters();
   const [filterOptions, setFilterOptions] = useState({});
-  const [isLoadingFilters, setIsLoadingFilters] = useState(true);
-
-  useEffect(() => {
-    const fetchOptions = async () => {
-      setIsLoadingFilters(true);
-      const newOptions = {};
-      for (const filter of filtersConfig) {
-        if ((filter.type === 'multi-select' || filter.type === 'select') && filter.sql) {
-          try {
-            const raw = await athenaService(filter.sql, filter.key);
-            const values = raw.map((r) => Object.values(r)[0]);
-            newOptions[filter.key] = values.map((v) => ({ label: v, value: v }));
-          } catch (err) {
-            console.error(`Error fetching options for ${filter.key}`, err);
-            newOptions[filter.key] = [];
-          }
-        }
-      }
-      setFilterOptions(newOptions);
-      setIsLoadingFilters(false);
-    };
-    fetchOptions();
-  }, []);
+  const [isLoadingFilters, setIsLoadingFilters] = useState({});
 
   const handleChange = (key, value) => {
     setTempFilters((prev) => ({ ...prev, [key]: value }));
   };
 
+  const loadOptionsForFilter = async (key, sql) => {
+    if (filterOptions[key] || isLoadingFilters[key]) return;
+
+    setIsLoadingFilters((prev) => ({ ...prev, [key]: true }));
+    try {
+      const raw = await athenaService(sql, key);
+      const values = raw.map((r) => Object.values(r)[0]);
+      const options = values.map((v) => ({ label: v, value: v }));
+      setFilterOptions((prev) => ({ ...prev, [key]: options }));
+    } catch (err) {
+      console.error(`Error loading options for ${key}:`, err);
+      setFilterOptions((prev) => ({ ...prev, [key]: [] }));
+    } finally {
+      setIsLoadingFilters((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
   return (
     <SpaceBetween size="m">
-      {isLoadingFilters ? (
-        <Box textAlign="center" padding="s">
-          <Header variant="h3">Loading filters...</Header>
-        </Box>
-      ) : (
-        <>
-          <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}> 
-            {filtersConfig.map(({ key, label, type, placeholder }) => (
-              <Box key={key} padding={{ bottom: 's' }}>
-                <Box variant="awsui-key-label" margin={{ bottom: 'xxs' }}>{label}</Box>
-                {type === 'multi-select' || type === 'select' ? (
-                  <Multiselect
-                  selectedOptions={(() => {
-                    const options = filterOptions[key] || [];
-                    const selected = tempFilters[key] || [];
-                
-                    const allSelected = selected.length === options.length;
-                
-                    return allSelected ? [{ label: 'Select All', value: '__select_all__' }] : selected;
-                  })()}
-                  onChange={({ detail }) => {
-                    const allOptions = filterOptions[key] || [];
-                    const isSelectAllClicked = detail.selectedOptions.some(opt => opt.value === '__select_all__');
-                    const selected = detail.selectedOptions;
-                
-                    if (isSelectAllClicked) {
-                      const allSelected = (tempFilters[key] || []).length === allOptions.length;
-                      handleChange(key, allSelected ? [] : allOptions);
-                    } else {
-                      handleChange(key, selected);
-                    }
-                  }}
-                  options={[{ label: 'Select All', value: '__select_all__' }, ...(filterOptions[key] || [])]}
-                  placeholder={`Select ${label}`}
-                  filteringType="auto"
-                  tokenLimit={0} // 👈 Hides preview chips under dropdown
-                />
-                
-                ) : type === 'text' ? (
-                  <Input
-                    value={tempFilters[key] || ''}
-                    onChange={({ detail }) => handleChange(key, detail.value)}
-                    placeholder={placeholder}
-                  />
-                ) : type === 'date' ? (
-                  <DatePicker
-                    value={tempFilters[key] || ''}
-                    onChange={({ detail }) => handleChange(key, detail.value)}
-                  />
-                ) : null}
-              </Box>
-            ))}
-          </Grid>
-          <Box>
-            <Button variant="primary" onClick={onApply}>Apply Filters</Button>
+      <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}>
+        {filtersConfig.map(({ key, label, type, placeholder, sql }) => (
+          <Box key={key} style={{ width: '100%' }}>
+            <Box variant="awsui-key-label" margin={{ bottom: 'xxs' }}>{label}</Box>
+
+            {type === 'multi-select' || type === 'select' ? (
+              <Multiselect
+                selectedOptions={(() => {
+                  const options = filterOptions[key] || [];
+                  const selected = tempFilters[key] || [];
+                  const allSelected = selected.length === options.length;
+                  return allSelected ? [{ label: 'Select All', value: '__select_all__' }] : selected;
+                })()}
+                onFocus={() => sql && loadOptionsForFilter(key, sql)}
+                onChange={({ detail }) => {
+                  const allOptions = filterOptions[key] || [];
+                  const selected = detail.selectedOptions;
+                  const isSelectAllClicked = selected.some((opt) => opt.value === '__select_all__');
+                  const allSelected = (tempFilters[key] || []).length === allOptions.length;
+
+                  handleChange(
+                    key,
+                    isSelectAllClicked ? (allSelected ? [] : allOptions) : selected
+                  );
+                }}
+                loadingText="Loading..."
+                statusType={isLoadingFilters[key] ? 'loading' : 'finished'}
+                options={[{ label: 'Select All', value: '__select_all__' }, ...(filterOptions[key] || [])]}
+                placeholder={`Select ${label}`}
+                filteringType="auto"
+                tokenLimit={0} // ✅ No preview under the dropdown
+              />
+            ) : type === 'text' ? (
+              <Input
+                value={tempFilters[key] || ''}
+                onChange={({ detail }) => handleChange(key, detail.value)}
+                placeholder={placeholder}
+              />
+            ) : type === 'date' ? (
+              <DatePicker
+                value={tempFilters[key] || ''}
+                onChange={({ detail }) => handleChange(key, detail.value)}
+              />
+            ) : null}
           </Box>
-        </>
-      )}
+        ))}
+      </Grid>
+
+      <Box>
+        <Button variant="primary" onClick={onApply}>Apply Filters</Button>
+      </Box>
     </SpaceBetween>
   );
 };
+
 
 // ----------------- Dashboard -----------------
 const Dashboard = () => {
