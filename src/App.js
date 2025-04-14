@@ -21,12 +21,10 @@ import { athenaService, queryBuilder } from './athenaService';
 import { tabbedDashboardConfig } from './tabbedConfig';
 
 // ----------------- Parsing Logic -----------------
-const parseKPI = (raw) => {
-  return {
-    value: raw?.value ?? '--',
-    label: raw?.label ?? '',
-  };
-};
+const parseKPI = (raw) => ({
+  value: raw?.value ?? '--',
+  label: raw?.label ?? '',
+});
 
 const parseGraph = (raw) => {
   const x = raw.map((r) => r.month || r.x || '');
@@ -118,9 +116,11 @@ const DataTable = ({ parsed }) => {
 const FilterControls = ({ onApply }) => {
   const { tempFilters, setTempFilters } = useFilters();
   const [filterOptions, setFilterOptions] = useState({});
+  const [isLoadingFilters, setIsLoadingFilters] = useState(true);
 
   useEffect(() => {
     const fetchOptions = async () => {
+      setIsLoadingFilters(true);
       const newOptions = {};
       for (const filter of filtersConfig) {
         if ((filter.type === 'multi-select' || filter.type === 'select') && filter.sql) {
@@ -135,6 +135,7 @@ const FilterControls = ({ onApply }) => {
         }
       }
       setFilterOptions(newOptions);
+      setIsLoadingFilters(false);
     };
     fetchOptions();
   }, []);
@@ -145,36 +146,58 @@ const FilterControls = ({ onApply }) => {
 
   return (
     <SpaceBetween size="m">
-      <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}> 
-        {filtersConfig.map(({ key, label, type, placeholder }) => (
-          <Box key={key} padding={{ bottom: 's' }}>
-            <Box variant="awsui-key-label" margin={{ bottom: 'xxs' }}>{label}</Box>
-            {type === 'multi-select' || type === 'select' ? (
-              <Multiselect
-                selectedOptions={tempFilters[key] || []}
-                onChange={({ detail }) => handleChange(key, detail.selectedOptions)}
-                options={filterOptions[key] || []}
-                placeholder={`Select ${label}`}
-                filteringType="auto"
-              />
-            ) : type === 'text' ? (
-              <Input
-                value={tempFilters[key] || ''}
-                onChange={({ detail }) => handleChange(key, detail.value)}
-                placeholder={placeholder}
-              />
-            ) : type === 'date' ? (
-              <DatePicker
-                value={tempFilters[key] || ''}
-                onChange={({ detail }) => handleChange(key, detail.value)}
-              />
-            ) : null}
+      {isLoadingFilters ? (
+        <Box textAlign="center" padding="s">
+          <Header variant="h3">Loading filters...</Header>
+        </Box>
+      ) : (
+        <>
+          <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}> 
+            {filtersConfig.map(({ key, label, type, placeholder }) => (
+              <Box key={key} padding={{ bottom: 's' }}>
+                <Box variant="awsui-key-label" margin={{ bottom: 'xxs' }}>{label}</Box>
+                {type === 'multi-select' || type === 'select' ? (
+                  <Multiselect
+                    selectedOptions={
+                      tempFilters[key]?.length
+                        ? tempFilters[key]
+                        : filterOptions[key]
+                          ? [{ label: 'Select All', value: '__select_all__' }]
+                          : []
+                    }
+                    onChange={({ detail }) => {
+                      const isSelectAllClicked = detail.selectedOptions.some(opt => opt.value === '__select_all__');
+                      const allOptions = filterOptions[key] || [];
+                      if (isSelectAllClicked) {
+                        handleChange(key, allOptions);
+                      } else {
+                        handleChange(key, detail.selectedOptions);
+                      }
+                    }}
+                    options={[{ label: 'Select All', value: '__select_all__' }, ...(filterOptions[key] || [])]}
+                    placeholder={`Select ${label}`}
+                    filteringType="auto"
+                  />
+                ) : type === 'text' ? (
+                  <Input
+                    value={tempFilters[key] || ''}
+                    onChange={({ detail }) => handleChange(key, detail.value)}
+                    placeholder={placeholder}
+                  />
+                ) : type === 'date' ? (
+                  <DatePicker
+                    value={tempFilters[key] || ''}
+                    onChange={({ detail }) => handleChange(key, detail.value)}
+                  />
+                ) : null}
+              </Box>
+            ))}
+          </Grid>
+          <Box>
+            <Button variant="primary" onClick={onApply}>Apply Filters</Button>
           </Box>
-        ))}
-      </Grid>
-      <Box>
-        <Button variant="primary" onClick={onApply}>Apply Filters</Button>
-      </Box>
+        </>
+      )}
     </SpaceBetween>
   );
 };
