@@ -7,7 +7,7 @@ import {
   Button,
   Container,
   Header,
-  Select,
+  Multiselect,
   SpaceBetween,
   Input,
   DatePicker,
@@ -22,39 +22,27 @@ import { tabbedDashboardConfig } from './tabbedConfig';
 
 // ----------------- Parsing Logic -----------------
 const parseKPI = (raw) => {
-  const mock = { value: Math.floor(Math.random() * 1000), label: 'Mocked KPI' };
-  return { value: '--', label: 'No Data' };
   return {
-    value: raw.value ?? '--',
-    label: raw.label ?? '',
+    value: raw?.value ?? '--',
+    label: raw?.label ?? '',
   };
 };
 
 const parseGraph = (raw) => {
-  const mock = { x: ['Jan', 'Feb', 'Mar'], y: [100, 200, 150] };
-  return { x: [], y: [] };
   const x = raw.map((r) => r.month || r.x || '');
   const y = raw.map((r) => r.count || r.y || 0);
   return { x, y };
 };
 
 const parseTable = (raw) => {
-  const mock = {
-    headers: ['Name', 'Age', 'Role'],
-    rows: Array.from({ length: 10 }, (_, i) => ({
-      Name: `Mock User ${i + 1}`,
-      Age: 25 + i,
-      Role: i % 2 === 0 ? 'Engineer' : 'Manager'
-    }))
-  };
-  return { headers: [], rows: [] };
+  if (!raw || !raw.length) return { headers: [], rows: [] };
   const headers = Object.keys(raw[0]);
   return { headers, rows: raw };
 };
 
 // ----------------- Filter Context -----------------
 const FilterContext = createContext();
-const useFilters = () => useContext(FilterContext);
+export const useFilters = () => useContext(FilterContext);
 
 // ----------------- KPI Box -----------------
 const KPIBox = ({ parsed, title }) => (
@@ -87,38 +75,25 @@ const DataTable = ({ parsed }) => {
   const paginatedRows = parsed.rows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const goToPage = (page) => {
-    if (page >= 1 && page <= totalPages) {
-      setCurrentPage(page);
-    }
+    if (page >= 1 && page <= totalPages) setCurrentPage(page);
   };
 
   return (
     <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '400px' }}>
       <Box margin={{ bottom: 's' }} display="flex" justifyContent="space-between" alignItems="center">
-        <Box>
-          <Select
-            selectedOption={{ label: `${pageSize}`, value: `${pageSize}` }}
-            onChange={({ detail }) => {
-              setPageSize(Number(detail.selectedOption.value));
-              setCurrentPage(1);
-            }}
-            options={[10, 20, 30, 50].map((v) => ({ label: `${v}`, value: `${v}` }))}
-          />
-        </Box>
+        <Multiselect
+          selectedOptions={[{ label: `${pageSize}`, value: `${pageSize}` }]}
+          onChange={({ detail }) => {
+            setPageSize(Number(detail.selectedOptions[0].value));
+            setCurrentPage(1);
+          }}
+          options={[10, 20, 30, 50].map((v) => ({ label: `${v}`, value: `${v}` }))}
+          placeholder="Rows per page"
+        />
         <SpaceBetween direction="horizontal" size="xs">
-          <Button
-            iconName="angle-left"
-            onClick={() => goToPage(currentPage - 1)}
-            disabled={currentPage === 1}
-            variant="icon"
-          />
+          <Button iconName="angle-left" onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} variant="icon" />
           <Box>Page {currentPage} of {totalPages}</Box>
-          <Button
-            iconName="angle-right"
-            onClick={() => goToPage(currentPage + 1)}
-            disabled={currentPage === totalPages}
-            variant="icon"
-          />
+          <Button iconName="angle-right" onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} variant="icon" />
         </SpaceBetween>
       </Box>
       <table style={{ tableLayout: 'auto', width: '100%', borderCollapse: 'collapse' }} border="1" cellPadding={4}>
@@ -142,6 +117,28 @@ const DataTable = ({ parsed }) => {
 // ----------------- Filter Controls -----------------
 const FilterControls = ({ onApply }) => {
   const { tempFilters, setTempFilters } = useFilters();
+  const [filterOptions, setFilterOptions] = useState({});
+
+  useEffect(() => {
+    const fetchOptions = async () => {
+      const newOptions = {};
+      for (const filter of filtersConfig) {
+        if ((filter.type === 'multi-select' || filter.type === 'select') && filter.sql) {
+          try {
+            const raw = await athenaService(filter.sql, filter.key);
+            const values = raw.map((r) => Object.values(r)[0]);
+            newOptions[filter.key] = values.map((v) => ({ label: v, value: v }));
+          } catch (err) {
+            console.error(`Error fetching options for ${filter.key}`, err);
+            newOptions[filter.key] = [];
+          }
+        }
+      }
+      setFilterOptions(newOptions);
+    };
+    fetchOptions();
+  }, []);
+
   const handleChange = (key, value) => {
     setTempFilters((prev) => ({ ...prev, [key]: value }));
   };
@@ -149,14 +146,16 @@ const FilterControls = ({ onApply }) => {
   return (
     <SpaceBetween size="m">
       <Grid gridDefinition={[{ colspan: 4 }, { colspan: 4 }, { colspan: 4 }]}> 
-        {filtersConfig.map(({ key, label, type, options, placeholder }) => (
+        {filtersConfig.map(({ key, label, type, placeholder }) => (
           <Box key={key} padding={{ bottom: 's' }}>
             <Box variant="awsui-key-label" margin={{ bottom: 'xxs' }}>{label}</Box>
             {type === 'multi-select' || type === 'select' ? (
-              <Select
-                selectedOption={{ label: tempFilters[key] || 'All', value: tempFilters[key] || 'All' }}
-                onChange={({ detail }) => handleChange(key, detail.selectedOption.value)}
-                options={options.map((opt) => ({ label: opt, value: opt }))}
+              <Multiselect
+                selectedOptions={tempFilters[key] || []}
+                onChange={({ detail }) => handleChange(key, detail.selectedOptions)}
+                options={filterOptions[key] || []}
+                placeholder={`Select ${label}`}
+                filteringType="auto"
               />
             ) : type === 'text' ? (
               <Input
@@ -291,7 +290,7 @@ const Dashboard = () => {
   );
 };
 
-// ----------------- App -----------------
+// ----------------- App Root -----------------
 const App = () => {
   const [filters, setFilters] = useState({});
   const [tempFilters, setTempFilters] = useState({});
