@@ -54,13 +54,21 @@ import {
   
     Object.entries(filters).forEach(([key, value]) => {
       if (!value || value === 'All' || value.length === 0) return;
+  
       if (Array.isArray(value)) {
-        const filtered = value.filter((v) => v !== 'All');
-        if (filtered.length > 0) {
-          clauses.push(`${key} IN (${filtered.map((v) => `'${v}'`).join(', ')})`);
+        const values = value
+          .map((v) => typeof v === 'object' ? v.value : v)
+          .filter((v) => v !== 'All' && v !== '__select_all__');
+  
+        if (values.length > 0) {
+          clauses.push(`${key} IN (${values.map((v) => `'${v}'`).join(', ')})`);
         }
       } else {
-        clauses.push(`${key} = '${value}'`);
+        if (typeof value === 'object' && value.value) {
+          clauses.push(`${key} = '${value.value}'`);
+        } else {
+          clauses.push(`${key} = '${value}'`);
+        }
       }
     });
   
@@ -69,5 +77,5 @@ import {
       query += clauses.join(' AND ');
     }
   
-    return query;
+    return query;  
   };

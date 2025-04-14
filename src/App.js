@@ -158,26 +158,32 @@ const FilterControls = ({ onApply }) => {
                 <Box variant="awsui-key-label" margin={{ bottom: 'xxs' }}>{label}</Box>
                 {type === 'multi-select' || type === 'select' ? (
                   <Multiselect
-                    selectedOptions={
-                      tempFilters[key]?.length
-                        ? tempFilters[key]
-                        : filterOptions[key]
-                          ? [{ label: 'Select All', value: '__select_all__' }]
-                          : []
+                  selectedOptions={(() => {
+                    const options = filterOptions[key] || [];
+                    const selected = tempFilters[key] || [];
+                
+                    const allSelected = selected.length === options.length;
+                
+                    return allSelected ? [{ label: 'Select All', value: '__select_all__' }] : selected;
+                  })()}
+                  onChange={({ detail }) => {
+                    const allOptions = filterOptions[key] || [];
+                    const isSelectAllClicked = detail.selectedOptions.some(opt => opt.value === '__select_all__');
+                    const selected = detail.selectedOptions;
+                
+                    if (isSelectAllClicked) {
+                      const allSelected = (tempFilters[key] || []).length === allOptions.length;
+                      handleChange(key, allSelected ? [] : allOptions);
+                    } else {
+                      handleChange(key, selected);
                     }
-                    onChange={({ detail }) => {
-                      const isSelectAllClicked = detail.selectedOptions.some(opt => opt.value === '__select_all__');
-                      const allOptions = filterOptions[key] || [];
-                      if (isSelectAllClicked) {
-                        handleChange(key, allOptions);
-                      } else {
-                        handleChange(key, detail.selectedOptions);
-                      }
-                    }}
-                    options={[{ label: 'Select All', value: '__select_all__' }, ...(filterOptions[key] || [])]}
-                    placeholder={`Select ${label}`}
-                    filteringType="auto"
-                  />
+                  }}
+                  options={[{ label: 'Select All', value: '__select_all__' }, ...(filterOptions[key] || [])]}
+                  placeholder={`Select ${label}`}
+                  filteringType="auto"
+                  tokenLimit={0} // 👈 Hides preview chips under dropdown
+                />
+                
                 ) : type === 'text' ? (
                   <Input
                     value={tempFilters[key] || ''}
