@@ -4,7 +4,7 @@ const filtersConfig = [
     key: 'orgType',
     label: 'Org Type',
     type: 'multi-select',
-    sql: 'SELECT DISTINCT org_type FROM employee_data;',
+    sql: '',
   },
   {
     key: 'team',

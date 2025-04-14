@@ -20,24 +20,7 @@ import {
 import filtersConfig from './filtersConfig';
 import { athenaService, queryBuilder } from './athenaService';
 import { tabbedDashboardConfig } from './tabbedConfig';
-
-// ----------------- Parsing Logic -----------------
-const parseKPI = (raw) => ({
-  value: raw?.value ?? '--',
-  label: raw?.label ?? '',
-});
-
-const parseGraph = (raw) => {
-  const x = raw.map((r) => r.month || r.x || '');
-  const y = raw.map((r) => r.count || r.y || 0);
-  return { x, y };
-};
-
-const parseTable = (raw) => {
-  if (!raw || !raw.length) return { headers: [], rows: [] };
-  const headers = Object.keys(raw[0]);
-  return { headers, rows: raw };
-};
+import { parseKPI, parseGraph, parseTable } from './parseKPI';
 
 // ----------------- Filter Context -----------------
 const FilterContext = createContext();
@@ -127,10 +110,19 @@ const FilterControls = ({ onApply }) => {
     if (filterOptions[key] || isLoadingFilters[key]) return;
 
     setIsLoadingFilters((prev) => ({ ...prev, [key]: true }));
+
     try {
-      const raw = await athenaService(sql, key);
-      const values = raw.map((r) => Object.values(r)[0]);
-      const options = values.map((v) => ({ label: v, value: v }));
+      let options = [];
+
+      // ✅ MOCKED DATA: If no SQL is provided, inject dummy values
+      if (!sql) {
+        options = ['North', 'South', 'East', 'West'].map((v) => ({ label: v, value: v }));
+      } else {
+        const raw = await athenaService(sql, key);
+        const values = raw.map((r) => Object.values(r)[0]);
+        options = values.map((v) => ({ label: v, value: v }));
+      }
+
       setFilterOptions((prev) => ({ ...prev, [key]: options }));
     } catch (err) {
       console.error(`Error loading options for ${key}:`, err);
@@ -149,49 +141,44 @@ const FilterControls = ({ onApply }) => {
 
             {type === 'multi-select' || type === 'select' ? (
               <Multiselect
-                selectedOptions={(() => {
-                  const options = filterOptions[key] || [];
-                  const selected = tempFilters[key] || [];
-
-                  if (selected.length === 0 && options.length > 0) {
-                    return [{ label: 'Select All', value: '__select_all__' }];
-                  }
-
-                  const allSelected = selected.length === options.length;
-                  return allSelected
-                    ? [{ label: 'Unselect All', value: '__select_all__' }, ...selected]
-                    : selected;
-                })()}
-                onFocus={() => sql && loadOptionsForFilter(key, sql)}
+              selectedOptions={(() => {
+                const options = filterOptions[key] || [];
+                const selected = tempFilters[key] || [];
+              
+                const isAllSelected = selected.length === options.length;
+              
+                return isAllSelected ? options : selected;
+              })()}
+              
+                onFocus={() => loadOptionsForFilter(key, sql)}
                 onChange={({ detail }) => {
                   const allOptions = filterOptions[key] || [];
                   const selected = detail.selectedOptions;
-                  const isSelectAllClicked = selected.find((opt) => opt.value === '__select_all__');
-                  const current = tempFilters[key] || [];
-                  const allSelected = current.length === allOptions.length;
-
-                  if (isSelectAllClicked) {
-                    handleChange(key, allSelected ? [] : allOptions);
+                
+                  // If "Select All" clicked
+                  const clickedSelectAll = selected.some(opt => opt.value === '__select_all__');
+                  const withoutSelectAll = selected.filter(opt => opt.value !== '__select_all__');
+                
+                  if (clickedSelectAll) {
+                    // If all already selected, deselect everything
+                    const isAllSelected = (tempFilters[key] || []).length === allOptions.length;
+                    handleChange(key, isAllSelected ? [] : allOptions);
                   } else {
-                    const filtered = selected.filter((opt) => opt.value !== '__select_all__');
-                    handleChange(key, filtered);
+                    // Manual selection
+                    handleChange(key, withoutSelectAll);
                   }
                 }}
+                
+                
                 loadingText="Loading..."
                 statusType={isLoadingFilters[key] ? 'loading' : 'finished'}
                 options={[
-                  {
-                    label:
-                      (tempFilters[key] || []).length === (filterOptions[key] || []).length
-                        ? 'Unselect All'
-                        : 'Select All',
-                    value: '__select_all__',
-                  },
+                  { label: 'Select All', value: '__select_all__' },
                   ...(filterOptions[key] || []),
                 ]}
                 placeholder={`Select ${label}`}
                 filteringType="auto"
-                tokenLimit={0} // ✅ Hide token preview under the dropdown
+                tokenLimit={0}
               />
             ) : type === 'text' ? (
               <Input
@@ -215,7 +202,6 @@ const FilterControls = ({ onApply }) => {
     </SpaceBetween>
   );
 };
-
 
 // ----------------- Dashboard -----------------
 const Dashboard = () => {
